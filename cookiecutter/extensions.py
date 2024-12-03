@@ -69,4 +69,25 @@ class TimeExtension(Extension):
 
     def parse(self, parser):
         """Parse datetime template and add datetime value."""
-        pass
+        lineno = next(parser.stream).lineno
+
+        # Parse any arguments passed to the tag
+        args = [parser.parse_expression()]
+        
+        # If there are no arguments, use the default format
+        if parser.stream.current.type != 'block_end':
+            parser.fail('Expected end of block', parser.stream.current.lineno)
+
+        # Create a call to arrow.now().format() with the datetime format
+        call = self.call_method(
+            '_render',
+            [nodes.ContextReference()],
+            lineno=lineno
+        )
+
+        return nodes.Output([call], lineno=lineno)
+
+    def _render(self, context):
+        """Render the current date and time."""
+        datetime_format = context.environment.datetime_format
+        return arrow.now().format(datetime_format)
