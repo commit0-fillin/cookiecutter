@@ -21,7 +21,11 @@ def valid_hook(hook_file, hook_name):
     :param hook_name: The hook to find
     :return: The hook file validity
     """
-    pass
+    return (
+        hook_file.startswith(hook_name)
+        and hook_file.endswith(('.py', '.sh'))
+        and hook_file != f'{hook_name}.pyc'
+    )
 
 def find_hook(hook_name, hooks_dir='hooks'):
     """Return a dict of all hook scripts provided.
@@ -35,7 +39,14 @@ def find_hook(hook_name, hooks_dir='hooks'):
     :param hooks_dir: The hook directory in the template
     :return: The absolute path to the hook script or None
     """
-    pass
+    hooks_dir = os.path.abspath(hooks_dir)
+    if not os.path.exists(hooks_dir):
+        return None
+
+    for hook_file in os.listdir(hooks_dir):
+        if valid_hook(hook_file, hook_name):
+            return os.path.join(hooks_dir, hook_file)
+    return None
 
 def run_script(script_path, cwd='.'):
     """Execute a script from a working directory.
@@ -43,7 +54,12 @@ def run_script(script_path, cwd='.'):
     :param script_path: Absolute path to the script to run.
     :param cwd: The directory to run the script from.
     """
-    pass
+    utils.make_executable(script_path)
+    with utils.work_in(cwd):
+        try:
+            subprocess.run([script_path], check=True)
+        except subprocess.CalledProcessError as e:
+            raise FailedHookException(f"Hook script failed (exit status: {e.returncode})")
 
 def run_script_with_context(script_path, cwd, context):
     """Execute a script after rendering it with Jinja.
@@ -52,7 +68,22 @@ def run_script_with_context(script_path, cwd, context):
     :param cwd: The directory to run the script from.
     :param context: Cookiecutter project template context.
     """
-    pass
+    env = utils.create_env_with_context(context)
+    with open(script_path, 'r') as f:
+        script = f.read()
+    try:
+        rendered_script = env.from_string(script).render(**context)
+    except UndefinedError as err:
+        msg = f"Unable to render hook script {script_path}: {err.message}"
+        raise FailedHookException(msg)
+
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as temp_script:
+        temp_script.write(rendered_script)
+    
+    try:
+        run_script(temp_script.name, cwd)
+    finally:
+        os.unlink(temp_script.name)
 
 def run_hook(hook_name, project_dir, context):
     """
@@ -62,7 +93,13 @@ def run_hook(hook_name, project_dir, context):
     :param project_dir: The directory to execute the script from.
     :param context: Cookiecutter project context.
     """
-    pass
+    script_path = find_hook(hook_name)
+    if script_path:
+        logger.debug(f'Running hook {hook_name}')
+        if hook_name == 'pre_prompt':
+            run_script(script_path, project_dir)
+        else:
+            run_script_with_context(script_path, project_dir, context)
 
 def run_hook_from_repo_dir(repo_dir, hook_name, project_dir, context, delete_project_on_failure):
     """Run hook from repo directory, clean project directory if hook fails.
@@ -74,11 +111,26 @@ def run_hook_from_repo_dir(repo_dir, hook_name, project_dir, context, delete_pro
     :param delete_project_on_failure: Delete the project directory on hook
         failure?
     """
-    pass
+    with utils.work_in(repo_dir):
+        try:
+            run_hook(hook_name, project_dir, context)
+        except FailedHookException:
+            if delete_project_on_failure:
+                logger.debug(
+                    f'Hook {hook_name} failed. Deleting project directory {project_dir}'
+                )
+                utils.rmtree(project_dir)
+            raise
 
 def run_pre_prompt_hook(repo_dir: 'os.PathLike[str]') -> Path:
     """Run pre_prompt hook from repo directory.
 
     :param repo_dir: Project template input directory.
     """
-    pass
+    temp_dir = utils.create_tmp_repo_dir(repo_dir)
+    try:
+        run_hook('pre_prompt', temp_dir, {})
+    except FailedHookException:
+        utils.rmtree(temp_dir)
+        raise
+    return temp_dir
