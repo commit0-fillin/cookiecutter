@@ -32,7 +32,8 @@ class ExtensionLoaderMixin:
         If context does not contain the relevant info, return an empty
         list instead.
         """
-        pass
+        extensions = context.get('cookiecutter', {}).get('_extensions', [])
+        return extensions if isinstance(extensions, list) else []
 
 class StrictEnvironment(ExtensionLoaderMixin, Environment):
     """Create strict Jinja2 environment.
