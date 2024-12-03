@@ -47,7 +47,68 @@ def cookiecutter(template, checkout=None, no_input=False, extra_context=None, re
     :param keep_project_on_failure: If `True` keep generated project directory even when
         generation fails
     """
-    pass
+    # Get user config
+    config_dict = get_user_config(config_file=config_file, default_config=default_config)
+
+    # Get the repo directory and determine if it's a local repo or remote
+    repo_dir, cleanup = determine_repo_dir(
+        template=template,
+        abbreviations=config_dict['abbreviations'],
+        clone_to_dir=config_dict['cookiecutters_dir'],
+        checkout=checkout,
+        no_input=no_input,
+        password=password,
+        directory=directory
+    )
+
+    # If it's a repo URL, clone it
+    if cleanup:
+        # Remove repo dir if it already exists
+        if no_input:
+            rmtree(repo_dir)
+        else:
+            prompt_and_delete(repo_dir, no_input)
+
+    # Run pre-prompt hook if it exists
+    if accept_hooks:
+        repo_dir = run_pre_prompt_hook(repo_dir)
+
+    # Get context
+    context_file = os.path.join(repo_dir, 'cookiecutter.json')
+    context = generate_context(
+        context_file=context_file,
+        default_context=config_dict['default_context'],
+        extra_context=extra_context,
+    )
+
+    # Prompt the user to manually configure at the command line.
+    # except when 'no-input' flag is set
+    context['cookiecutter'] = prompt_for_config(context, no_input)
+
+    # Create project from template
+    project_dir = generate_files(
+        repo_dir=repo_dir,
+        context=context,
+        overwrite_if_exists=overwrite_if_exists,
+        skip_if_file_exists=skip_if_file_exists,
+        output_dir=output_dir,
+        accept_hooks=accept_hooks,
+        keep_project_on_failure=keep_project_on_failure
+    )
+
+    # Cleanup repo if needed
+    if cleanup:
+        rmtree(repo_dir)
+
+    # Replay context if needed
+    if replay:
+        dump(
+            config_dict['replay_dir'],
+            template,
+            context['cookiecutter']
+        )
+
+    return project_dir
 
 class _patch_import_path_for_repo:
 
